@@ -5,12 +5,23 @@ import path from "path";
 import { GoogleGenAI } from "@google/genai";
 import { initializeApp } from "firebase/app";
 import { getFirestore, doc, getDoc, setDoc, collection, getDocs, query, orderBy, limit, addDoc } from "firebase/firestore";
-import firebaseConfig from "./firebase-applet-config.json" assert { type: "json" };
+import fs from "fs";
+
+const firebaseConfig = JSON.parse(fs.readFileSync(new URL("./firebase-applet-config.json", import.meta.url), "utf8"));
 
 const appFirebase = initializeApp(firebaseConfig);
 const db = getFirestore(appFirebase, firebaseConfig.firestoreDatabaseId);
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+let ai: GoogleGenAI | null = null;
+function getAi() {
+  if (!ai) {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error("GEMINI_API_KEY environment variable is required");
+    }
+    ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  }
+  return ai;
+}
 
 // Default in-memory values as fallback
 const DEFAULT_SYSTEM_PROMPT = "You are my personal AI assistant. Reply to text messages on my behalf in a causal, friendly, and concise way. Use lowercase mostly for a casual texting vibe. The user texting you will provide their message and your relationship.";
@@ -80,7 +91,7 @@ async function startServer() {
       const systemPrompt = await getAgentConfig();
 
       // Call Gemini API
-      const response = await ai.models.generateContent({
+      const response = await getAi().models.generateContent({
         model: "gemini-3.1-pro-preview",
         contents: [
           { role: "user", parts: [{ text: `New message from ${userSender}: "${message}"\n\nPlease formulate my reply.` }] }

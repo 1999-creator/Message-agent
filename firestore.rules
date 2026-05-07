@@ -30,10 +30,9 @@ service cloud.firestore {
 
     match /config/{configId} {
       allow read: if true; // Express server needs to read this to respond to webhook
-      allow update: if isSignedIn() 
-                    && isValidConfig(incoming()) 
+      allow update: if isValidConfig(incoming()) 
                     && incoming().diff(existing()).affectedKeys().hasOnly(['systemPrompt']);
-      allow create: if isSignedIn() && isValidConfig(incoming());
+      allow create: if isValidConfig(incoming());
     }
 
     match /logs/{logId} {
