@@ -1,0 +1,6 @@
+{
+  "name": "iMessage AI Agent",
+  "description": "An automated agent dashboard and backend API that uses Gemini to reply to your iMessages via iOS Shortcuts.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
