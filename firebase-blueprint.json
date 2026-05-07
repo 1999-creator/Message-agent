@@ -1,0 +1,35 @@
+{
+  "entities": {
+    "Config": {
+      "title": "AgentConfig",
+      "description": "Agent configuration",
+      "type": "object",
+      "properties": {
+        "systemPrompt": { "type": "string", "description": "The system prompt for " }
+      },
+      "required": ["systemPrompt"]
+    },
+    "LogEntry": {
+      "title": "LogEntry",
+      "description": "A single interaction log",
+      "type": "object",
+      "properties": {
+        "sender": { "type": "string" },
+        "received": { "type": "string" },
+        "reply": { "type": "string" },
+        "timestamp": { "type": "string" }
+      },
+      "required": ["sender", "received", "reply", "timestamp"]
+    }
+  },
+  "firestore": {
+    "/config/{configId}": {
+      "schema": { "$ref": "#/entities/Config" },
+      "description": "Global application config. Usually just one doc 'global'."
+    },
+    "/logs/{logId}": {
+      "schema": { "$ref": "#/entities/LogEntry" },
+      "description": "Logs of interactions."
+    }
+  }
+}

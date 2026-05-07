@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Primitives
+    function isValidId(id) { return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    function isSignedIn() { return request.auth != null; }
+
+    function isValidConfig(data) {
+      return data.keys().hasAll(['systemPrompt']) 
+             && data.keys().size() == 1
+             && data.systemPrompt is string 
+             && data.systemPrompt.size() <= 10000;
+    }
+
+    function isValidLogEntry(data) {
+      return data.keys().hasAll(['sender', 'received', 'reply', 'timestamp'])
+             && data.keys().size() == 4
+             && data.sender is string && data.sender.size() <= 200
+             && data.received is string && data.received.size() <= 5000
+             && data.reply is string && data.reply.size() <= 5000
+             && data.timestamp is string && data.timestamp.size() <= 100;
+    }
+
+    match /config/{configId} {
+      allow read: if true; // Express server needs to read this to respond to webhook
+      allow update: if isSignedIn() 
+                    && isValidConfig(incoming()) 
+                    && incoming().diff(existing()).affectedKeys().hasOnly(['systemPrompt']);
+      allow create: if isSignedIn() && isValidConfig(incoming());
+    }
+
+    match /logs/{logId} {
+      // The Express server (unauthenticated) creates logs when processing webhooks.
+      // We rely on size and schema constraints to prevent abuse.
+      allow create: if isValidLogEntry(incoming());
+      allow read: if true; // UI reads the logs and Express server reads to show limit. Actually, let's keep it true so Express can fetch.
+    }
+  }
+}

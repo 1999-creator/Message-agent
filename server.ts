@@ -3,16 +3,30 @@ import { createServer as createViteServer } from "vite";
 import cors from "cors";
 import path from "path";
 import { GoogleGenAI } from "@google/genai";
+import { initializeApp } from "firebase/app";
+import { getFirestore, doc, getDoc, setDoc, collection, getDocs, query, orderBy, limit, addDoc } from "firebase/firestore";
+import firebaseConfig from "./firebase-applet-config.json" assert { type: "json" };
+
+const appFirebase = initializeApp(firebaseConfig);
+const db = getFirestore(appFirebase, firebaseConfig.firestoreDatabaseId);
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-// In-memory store for our agent's configuration (resets on server restart)
-let agentConfig = {
-  systemPrompt: "You are my personal AI assistant. Reply to text messages on my behalf in a causal, friendly, and concise way. Use lowercase mostly for a casual texting vibe. The user texting you will provide their message and your relationship.",
-};
+// Default in-memory values as fallback
+const DEFAULT_SYSTEM_PROMPT = "You are my personal AI assistant. Reply to text messages on my behalf in a causal, friendly, and concise way. Use lowercase mostly for a casual texting vibe. The user texting you will provide their message and your relationship.";
 
-// In-memory log of recent messages to show on the dashboard
-let messageLogs: Array<{ id: string, timestamp: Date, sender: string, received: string, reply: string }> = [];
+async function getAgentConfig() {
+  try {
+    const docRef = doc(db, "config", "global");
+    const snapshot = await getDoc(docRef);
+    if (snapshot.exists()) {
+      return snapshot.data().systemPrompt;
+    }
+  } catch (err) {
+    console.error("Error reading config", err);
+  }
+  return DEFAULT_SYSTEM_PROMPT;
+}
 
 async function startServer() {
   const app = express();
@@ -22,21 +36,35 @@ async function startServer() {
   app.use(express.json());
 
   // API to get current config
-  app.get("/api/config", (req, res) => {
-    res.json(agentConfig);
+  app.get("/api/config", async (req, res) => {
+    const systemPrompt = await getAgentConfig();
+    res.json({ systemPrompt });
   });
 
   // API to update config
-  app.post("/api/config", (req, res) => {
-    if (req.body.systemPrompt) {
-      agentConfig.systemPrompt = req.body.systemPrompt;
+  app.post("/api/config", async (req, res) => {
+    try {
+      if (req.body.systemPrompt) {
+        await setDoc(doc(db, "config", "global"), { systemPrompt: req.body.systemPrompt });
+      }
+      res.json({ success: true, config: { systemPrompt: req.body.systemPrompt } });
+    } catch (err) {
+      console.error(err);
+      res.status(500).json({ error: "Failed to save config" });
     }
-    res.json({ success: true, config: agentConfig });
   });
 
   // API to view logs (for the dashboard)
-  app.get("/api/logs", (req, res) => {
-    res.json(messageLogs.slice(0, 50)); // Return last 50
+  app.get("/api/logs", async (req, res) => {
+    try {
+      const q = query(collection(db, "logs"), orderBy("timestamp", "desc"), limit(50));
+      const querySnapshot = await getDocs(q);
+      const logs = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      res.json(logs);
+    } catch (err) {
+      console.error("Error reading logs:", err);
+      res.status(500).json({ error: "Failed to read logs" });
+    }
   });
 
   // Main webhook endpoint used by iOS Shortcuts
@@ -49,6 +77,7 @@ async function startServer() {
       }
 
       const userSender = sender || "Unknown Person";
+      const systemPrompt = await getAgentConfig();
 
       // Call Gemini API
       const response = await ai.models.generateContent({
@@ -57,24 +86,20 @@ async function startServer() {
           { role: "user", parts: [{ text: `New message from ${userSender}: "${message}"\n\nPlease formulate my reply.` }] }
         ],
         config: {
-          systemInstruction: agentConfig.systemPrompt,
+          systemInstruction: systemPrompt,
           temperature: 0.7,
         }
       });
 
       const replyText = response.text || "Sorry, I couldn't generate a reply.";
 
-      // Log the interaction
-      messageLogs.unshift({
-        id: Math.random().toString(36).substring(7),
-        timestamp: new Date(),
+      // Log the interaction to Firestore
+      await addDoc(collection(db, "logs"), {
         sender: userSender,
         received: message,
-        reply: replyText
+        reply: replyText,
+        timestamp: new Date().toISOString()
       });
-
-      // Keep logs bounded
-      if (messageLogs.length > 200) messageLogs.length = 200;
 
       res.json({ reply: replyText });
     } catch (error) {
